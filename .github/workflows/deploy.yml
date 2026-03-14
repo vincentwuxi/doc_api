@@ -1,0 +1,67 @@
+name: Deploy DocSight to Server C
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  SERVER_HOST: 100.87.96.6
+  SERVER_USER: wenyun
+  DEPLOY_DIR: /home/wenyun/doc_api
+  CONTAINER_NAME: docsight
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, macOS, ARM64]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Server C
+        env:
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          # Setup SSH key
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=15 -i ~/.ssh/deploy_key"
+
+          echo "📦 Syncing project files..."
+          rsync -avz --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'AGENTS.md' \
+            --exclude '.agent' \
+            -e "ssh $SSH_OPTS" \
+            ./ ${SERVER_USER}@${SERVER_HOST}:${DEPLOY_DIR}/
+
+          echo "🐳 Building and deploying Docker container..."
+          ssh $SSH_OPTS ${SERVER_USER}@${SERVER_HOST} bash -s << 'DEPLOY'
+            set -e
+            cd /home/wenyun/doc_api
+
+            # Ensure the external network exists
+            sudo docker network create kreuzberg-deploy_default 2>/dev/null || true
+
+            # Build and restart
+            sudo docker compose down --remove-orphans 2>/dev/null || true
+            sudo docker compose build --no-cache
+            sudo docker compose up -d
+
+            # Verify
+            sleep 3
+            if sudo docker ps --format '{{.Names}} {{.Status}}' | grep -q "docsight.*Up"; then
+              echo "✅ DocSight deployed successfully!"
+              sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | grep docsight
+            else
+              echo "❌ Deployment failed!"
+              sudo docker logs docsight --tail 20
+              exit 1
+            fi
+          DEPLOY
+
+          # Cleanup
+          rm -f ~/.ssh/deploy_key
+          echo "🎉 Deployment complete!"
