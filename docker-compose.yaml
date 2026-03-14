@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   docsight:
     build: .
@@ -7,9 +5,3 @@ services:
     ports:
       - "3070:80"
     restart: unless-stopped
-    networks:
-      - kreuzberg-deploy_default
-
-networks:
-  kreuzberg-deploy_default:
-    external: true
